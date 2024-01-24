@@ -1,32 +1,43 @@
 #!/usr/bin/env python3
-""" Redis Module """
-
-from functools import wraps
-import redis
+'''A module with tools for request caching and tracking.
+'''
 import requests
-from typing import Callable
+import time
+from functools import wraps
 
-redis_ = redis.Redis()
+def cache_with_expiry(expiry_time):
+    def decorator(func):
+        cache = {}
 
+        @wraps(func)
+        def wrapper(url):
+            if url in cache and time.time() - cache[url]["timestamp"] < expiry_time:
+                cache[url]["count"] += 1
+                return cache[url]["content"]
+            else:
+                content = func(url)
+                cache[url] = {
+                    "content": content,
+                    "count": 1,
+                    "timestamp": time.time()
+                }
+                return content
 
-def count_requests(method: Callable) -> Callable:
-    """ Decortator for counting """
-    @wraps(method)
-    def wrapper(url):  # sourcery skip: use-named-expression
-        """ Wrapper for decorator """
-        redis_.incr(f"count:{url}")
-        cached_html = redis_.get(f"cached:{url}")
-        if cached_html:
-            return cached_html.decode('utf-8')
-        html = method(url)
-        redis_.setex(f"cached:{url}", 10, html)
-        return html
+        return wrapper
 
-    return wrapper
+    return decorator
 
+@cache_with_expiry(10)
+def get_page(url):
+    response = requests.get(url)
+    return response.text
 
-@count_requests
-def get_page(url: str) -> str:
-    """ Obtain the HTML content of a  URL """
-    req = requests.get(url)
-    return req.text
+# Test the get_page function
+url = "http://slowwly.robertomurray.co.uk/delay/5000/url/http://www.example.com"
+print(get_page(url))  # This will take 5 seconds to respond
+print(get_page(url))  # This will retrieve the cached result
+
+# Wait for 10 seconds
+time.sleep(10)
+
+print(get_page(url))  # This will fetch the page again since the cache has expired
